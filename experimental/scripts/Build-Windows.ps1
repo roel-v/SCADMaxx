@@ -112,9 +112,9 @@ try {
     # Invalidate the attempted checkpoint and its successors before work starts. A failed retry must not
     # retain an earlier success marker for output that may now be incomplete.
     $invalidated = switch ($Step) {
-        Build { @('builtSha','testedSha','stagedSha','staging','stagingInventory') }
-        Test { @('testedSha','stagedSha','staging','stagingInventory') }
-        Stage { @('stagedSha','staging','stagingInventory') }
+        Build { @('builtSha','testedSha','stagedSha','staging','stagingInventory','skillCompanionPath') }
+        Test { @('testedSha','stagedSha','staging','stagingInventory','skillCompanionPath') }
+        Stage { @('stagedSha','staging','stagingInventory','skillCompanionPath') }
     }
     if ($state -and $invalidated) {
         foreach ($key in $invalidated) { $state.Remove($key) }
@@ -211,18 +211,7 @@ try {
             Copy-Item (Join-Path $Source 'COPYING') $Staging
             # Selected agent features ship direct-HTTP skills and contracts with the GUI.
             # Copy tracked documentation only; test drivers and caches are not product tools.
-            $agentBundles = @{ 'http-agent-server'='openscad-agent-server' }
-            foreach ($featureId in $agentBundles.Keys) {
-                if ($featureId -notin $runInfo.entries.id) { continue }
-                $bundle = $agentBundles[$featureId]
-                $tracked = @(& git -C $Source ls-files -- "contrib/$bundle/*.md" "contrib/$bundle/*.json")
-                if ($LASTEXITCODE -ne 0 -or !$tracked.Count) { throw "Missing tracked agent skill bundle for $featureId" }
-                foreach ($relative in $tracked) {
-                    $destination = Join-Path $Staging $relative.Substring('contrib/'.Length)
-                    New-Item -ItemType Directory -Force (Split-Path $destination) | Out-Null
-                    Copy-Item -LiteralPath (Join-Path $Source $relative) -Destination $destination
-                }
-            }
+            Copy-SourceAgentBundles $Source $Staging $runInfo.entries
             $licenses = Join-Path $Staging 'licenses'
             New-Item -ItemType Directory $licenses | Out-Null
             Get-ChildItem (Join-Path $triplet 'share') -Directory | ForEach-Object {
@@ -239,9 +228,18 @@ try {
             }
             $sourceHistory = Read-Git $Source @('log','--reverse','--format=fuller',"$($runInfo.upstream)..$head")
             $sourceHistory | Set-Content (Join-Path $Run 'final-source-commits.txt') -Encoding utf8NoBOM
+            # Freeze this control-owned companion with the same source identity as the application.
+            # Its ZIP stays outside the application staging tree and is delivered only by Package.
+            $companionDirectory = Join-Path $Run "companions/$attemptId"
+            $companion = New-SkillCompanion $record.controlSnapshot $Source `
+                (Join-Path $companionDirectory 'work') `
+                (Join-Path $companionDirectory "$version-$attemptId-scadmaxx-skill.zip")
+            Assert-SkillCompanion $companion.path $companion.metadata $record.controlSnapshot $Source
+            $record.skillCompanion = $companion
             $info = @{inputs=$runInfo; finalSource=$head; sourceHistory=$sourceHistory; version=$version; submodules=$record.submodules;
                 testEnvironment=$record.testEnvironment;
                 profile=$p; featureFlags=$record.featureFlags; fingerprint=$fingerprint; controlSnapshot=$record.controlSnapshot;
+                skillCompanion=$companion.metadata;
                 dependencyStatusHash=$state.dependencyStatusHash;
                 qtDeployment='locked Release DLLs and Qt plugin directories with app-local qt.conf';
                 integrations=$ledger; verification='automated checks only; see GUI evidence'}
@@ -250,6 +248,7 @@ try {
             $state.stagedSha = $head
             $state.staging = $Staging
             $state.stagingInventory = Get-FileInventory $Staging
+            $state.skillCompanionPath = $companion.path
         }
         Package {
             if (!$Staging -or !$state.ContainsKey('stagedSha') -or $state.stagedSha -ne $head -or $state.staging -ne $Staging) {
@@ -259,6 +258,18 @@ try {
             $original = $state.stagingInventory | ForEach-Object { "$($_.path):$($_.sha256)" }
             $current = Get-FileInventory $Staging | ForEach-Object { "$($_.path):$($_.sha256)" }
             if (Compare-Object $original $current) { throw 'Staging changed after verification; stage and test a new attempt.' }
+            $stagedInfo = Get-Content -LiteralPath (Join-Path $Staging 'build-info.json') -Raw | ConvertFrom-Json -AsHashtable
+            if (!$state.ContainsKey('skillCompanionPath') -or !$stagedInfo.ContainsKey('skillCompanion') -or
+                $stagedInfo.finalSource -ne $head -or $stagedInfo.skillCompanion.source_revision -ne $head) {
+                throw 'Stage lacks matching application/companion provenance; stage a new attempt.'
+            }
+            Assert-ChildPath $state.skillCompanionPath (Join-Path $Run 'companions')
+            Assert-ChildPath $stagedInfo.controlSnapshot (Join-Path $Run 'control')
+            Assert-SkillCompanion $state.skillCompanionPath $stagedInfo.skillCompanion $stagedInfo.controlSnapshot $Source
+            $companionDelivery = Join-Path (Split-Path $Staging) $stagedInfo.skillCompanion.filename
+            if ((Test-Path -LiteralPath $companionDelivery) -or (Test-Path -LiteralPath "$companionDelivery.sha256")) {
+                throw 'Existing companion delivery is preserved; use a new delivery attempt.'
+            }
             $zip = Join-Path (Split-Path $Staging) 'scadmaxx-2026100-windows-x64.zip'
             $extract = Join-Path (Split-Path $Staging) 'extracted-check'
             if ((Test-Path $zip) -or (Test-Path $extract)) { throw 'Existing package/extraction is preserved; use a new delivery attempt.' }
@@ -270,13 +281,16 @@ try {
             Set-Content "$zip.sha256" "$($hash.Hash.ToLower())  $(Split-Path $zip -Leaf)" -Encoding ascii
             $record.zip = $zip
             $record.sha256 = $hash.Hash
+            $record.skillCompanion = @{path=(Copy-SkillCompanion $state.skillCompanionPath $stagedInfo.skillCompanion `
+                $stagedInfo.controlSnapshot $Source (Split-Path $Staging)); metadata=$stagedInfo.skillCompanion}
             $sourceStage = Join-Path $Run "$attemptId-source"
             Export-SourceTree $Source $sourceStage (Join-Path $Run "$attemptId-source-tars") $cmake
             $material = Join-Path $sourceStage 'experimental-build-material'
             New-Item -ItemType Directory $material | Out-Null
             Copy-Item (Join-Path $Staging 'build-info.json'),(Join-Path $Run 'inputs.json'),
                 (Join-Path $Run 'integrations.json'),(Join-Path $Run 'report.md') $material
-            Copy-Item -LiteralPath $record.controlSnapshot -Destination (Join-Path $material 'controls') -Recurse
+            # Deliver the exact Stage snapshot used by the frozen companion builder.
+            Copy-Item -LiteralPath $stagedInfo.controlSnapshot -Destination (Join-Path $material 'controls') -Recurse
             Copy-Item -LiteralPath (Join-Path $Run 'logs') -Destination (Join-Path $material 'logs') -Recurse
             foreach ($evidenceFolder in @('feature-checks','baseline-repair-probes')) {
                 $evidencePath = Join-Path $Run $evidenceFolder

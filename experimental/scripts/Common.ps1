@@ -127,13 +127,17 @@ function Save-ControlSnapshot([string]$Workspace, [string]$RunDirectory, [string
     $destination = Join-Path $RunDirectory "control/$Attempt"
     New-Item -ItemType Directory $destination | Out-Null
     $files = @('AGENTS.md','README.md','docs/git-layout.md','docs/worktrees.md',
-        'docs/workspace.md','docs/layout-migration.md',
+        'docs/workspace.md','docs/layout-migration.md','docs/scadmaxx-skill.md',
         'workflows/update-and-build-scadmaxx.md','workflows/experimental-builds.md','experimental/PR_STACK.md',
         'experimental/SOURCES.json','experimental/integration-inputs.md','experimental/REPAIRS.md','experimental/versioning-and-releases.md',
         'experimental/profiles/windows-x64.md','experimental/templates/run-report.md')
     $files += @(Get-ChildItem (Join-Path $Workspace 'experimental/scripts') -File | ForEach-Object {
         [IO.Path]::GetRelativePath($Workspace,$_.FullName)
     })
+    # The authored skill is a release input, not a file borrowed from the live checkout at Stage.
+    $files += @(Get-ChildItem -LiteralPath (Join-Path $Workspace 'skills/scadmaxx') -Recurse -File | Where-Object {
+        $_.Extension -ne '.zip' -and $_.FullName -notmatch '[\\/](?:__pycache__|staging)[\\/]'
+    } | ForEach-Object { [IO.Path]::GetRelativePath($Workspace,$_.FullName) })
     $repairDirectory = Join-Path $Workspace 'experimental/repairs'
     if (Test-Path $repairDirectory) {
         $files += @(Get-ChildItem $repairDirectory -Filter '*.md' -File | ForEach-Object {
@@ -156,6 +160,118 @@ function Save-ControlSnapshot([string]$Workspace, [string]$RunDirectory, [string
     Save-Json (Join-Path $destination 'snapshot.json') @{commit=$controlHead; files=$inventory;
         status=(Read-Git $Workspace @('status','--porcelain','--untracked-files=all'))}
     return $destination
+}
+
+function Assert-ControlSnapshot([string]$Snapshot) {
+    $manifest = Join-Path $Snapshot 'snapshot.json'
+    $info = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -AsHashtable
+    if (!$info.ContainsKey('commit') -or !$info.ContainsKey('files')) { throw 'Invalid control snapshot manifest.' }
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in $info.files) {
+        $relative = $file.path.Replace('\','/')
+        $path = Join-Path $Snapshot $relative
+        Assert-ChildPath $path $Snapshot
+        if (!$seen.Add($relative) -or !(Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) {
+            throw "Control snapshot file/hash mismatch: $relative"
+        }
+    }
+    foreach ($required in @('experimental/scripts/Build-ScadmaxxSkill.ps1','skills/scadmaxx/SKILL.md','docs/scadmaxx-skill.md')) {
+        if (!$seen.Contains($required)) { throw "Control snapshot omitted companion input: $required" }
+    }
+    return $manifest
+}
+
+function New-SkillCompanion([string]$Snapshot, [string]$Source, [string]$WorkDirectory, [string]$OutputZip) {
+    $manifest = Assert-ControlSnapshot $Snapshot
+    $builder = Join-Path $Snapshot 'experimental/scripts/Build-ScadmaxxSkill.ps1'
+    $result = @(& $builder -CustomizerSourceRoot $Source -OutputZip $OutputZip `
+        -SkillRoot (Join-Path $Snapshot 'skills/scadmaxx') -WorkDirectory $WorkDirectory -ControlManifestPath $manifest)
+    if ($result.Count -ne 1 -or $result[0].path -ne [IO.Path]::GetFullPath($OutputZip)) {
+        throw 'Frozen companion builder did not return exactly one matching artifact.'
+    }
+    $artifact = $result[0]
+    if (!(Test-Path -LiteralPath $artifact.path -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $artifact.path -Algorithm SHA256).Hash -ne $artifact.sha256) {
+        throw 'Frozen companion artifact/hash mismatch.'
+    }
+    Assert-ControlSnapshot $Snapshot | Out-Null
+    return @{path=$artifact.path; metadata=@{
+        filename=(Split-Path $artifact.path -Leaf); sha256=$artifact.sha256; source_revision=$artifact.source_revision;
+        document_sha256=$artifact.document_sha256; control_manifest_sha256=$artifact.control_manifest_sha256}}
+}
+
+function Assert-SkillCompanion([string]$Path, [hashtable]$Metadata, [string]$Snapshot, [string]$Source) {
+    if (!$Metadata.filename -or [IO.Path]::GetFileName($Metadata.filename) -ne $Metadata.filename -or
+        $Metadata.filename -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*\.zip$' -or
+        (Split-Path $Path -Leaf) -ne $Metadata.filename) { throw 'Invalid companion delivery filename.' }
+    foreach ($field in @('sha256','document_sha256','control_manifest_sha256')) {
+        if ($Metadata[$field] -notmatch '^[0-9a-f]{64}$') { throw "Invalid companion provenance: $field" }
+    }
+    if (!(Test-Path -LiteralPath $Path -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $Metadata.sha256) {
+        throw 'Recorded companion is missing or its SHA-256 changed; stage a new attempt.'
+    }
+    $manifest = Assert-ControlSnapshot $Snapshot
+    if ((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash -ne $Metadata.control_manifest_sha256) {
+        throw 'Companion control manifest hash does not match Stage.'
+    }
+    if ((Read-Git $Source @('rev-parse','HEAD')) -ne $Metadata.source_revision -or
+        (Read-Git $Source @('status','--porcelain','--','doc/customizer-attributes.md')) -or
+        (Get-FileHash -LiteralPath (Join-Path $Source 'doc/customizer-attributes.md') -Algorithm SHA256).Hash -ne $Metadata.document_sha256) {
+        throw 'Companion canonical source provenance does not match the application.'
+    }
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entries = @($archive.Entries | Where-Object { $_.FullName.Replace('\','/') -eq 'scadmaxx/references/bundle-source.json' })
+        if ($entries.Count -ne 1) { throw 'Companion archive lacks unique bundle provenance.' }
+        $reader = [IO.StreamReader]::new($entries[0].Open())
+        try { $bundled = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+        if ($bundled.schema_version -ne 1 -or $bundled.canonical_document -ne 'doc/customizer-attributes.md') {
+            throw 'Companion archive has unsupported provenance.'
+        }
+        foreach ($field in @('source_revision','document_sha256','control_manifest_sha256')) {
+            if ($bundled[$field] -ne $Metadata[$field]) { throw "Companion archive provenance mismatch: $field" }
+        }
+        $documents = @($archive.Entries | Where-Object { $_.FullName.Replace('\','/') -eq 'scadmaxx/references/customizer-attributes.md' })
+        if ($documents.Count -ne 1) { throw 'Companion archive lacks unique canonical document.' }
+        $stream = $documents[0].Open()
+        try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)).ToLowerInvariant() }
+        finally { $stream.Dispose() }
+        if ($hash -ne $Metadata.document_sha256) { throw 'Companion bundled canonical document hash mismatch.' }
+    } finally { $archive.Dispose() }
+}
+
+function Copy-SkillCompanion([string]$Path, [hashtable]$Metadata, [string]$Snapshot, [string]$Source, [string]$DeliveryDirectory) {
+    Assert-SkillCompanion $Path $Metadata $Snapshot $Source
+    $destination = Join-Path $DeliveryDirectory $Metadata.filename
+    Assert-ChildPath $destination $DeliveryDirectory
+    if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath "$destination.sha256")) {
+        throw 'Existing companion delivery is preserved; use a new delivery attempt.'
+    }
+    # File.Copy's two-argument overload refuses an artifact created after the preflight check.
+    [IO.File]::Copy($Path,$destination)
+    if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ne $Metadata.sha256) {
+        throw 'Delivered companion SHA-256 differs from Stage.'
+    }
+    Set-Content -LiteralPath "$destination.sha256" -Value "$($Metadata.sha256)  $($Metadata.filename)" -Encoding ascii
+    return $destination
+}
+
+function Copy-SourceAgentBundles([string]$Source, [string]$Staging, [object[]]$Entries) {
+    # This source-owned bundle remains independent of the control-owned skill companion.
+    $agentBundles = @{ 'http-agent-server'='openscad-agent-server' }
+    foreach ($featureId in $agentBundles.Keys) {
+        if (!@($Entries | Where-Object { $_.id -eq $featureId }).Count) { continue }
+        $bundle = $agentBundles[$featureId]
+        $tracked = @(& git -C $Source ls-files -- "contrib/$bundle/*.md" "contrib/$bundle/*.json")
+        if ($LASTEXITCODE -ne 0 -or !$tracked.Count) { throw "Missing tracked agent skill bundle for $featureId" }
+        foreach ($relative in $tracked) {
+            $destination = Join-Path $Staging $relative.Substring('contrib/'.Length)
+            New-Item -ItemType Directory -Force (Split-Path $destination) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Source $relative) -Destination $destination
+        }
+    }
 }
 
 function Invoke-Logged([string]$Executable, [string[]]$Arguments, [switch]$RejectErrors) {

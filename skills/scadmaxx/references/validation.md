@@ -1,7 +1,11 @@
 # Render, inspect and deliver
 
-Use the chosen executable's `--help` for supported flags and formats. On Windows `openscad.com` exposes
-console output and completion; launching a detached GUI executable is not a completed render check.
+Choose evidence using [inspection](inspection.md): source validity, geometry validity and intent validity
+are separate checks. Use [visual verification](visual-verification.md) for camera matching and affected-interface
+coverage. Export is a completion step within the selected task workflow, not a separate operating mode.
+
+Use the chosen executable's `--help` for supported flags and formats. On Windows select the delivered console
+launcher (`scadmaxx.com` or `openscad.com`) for output and completion; a detached GUI launch is not a completed render check.
 Keep outputs in a new task directory and record parameter overrides, backend and library revision.
 
 PowerShell example, with `$openscad`, `$model` and `$outputDir` set to actual selected paths:

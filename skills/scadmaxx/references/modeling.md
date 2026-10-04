@@ -1,8 +1,13 @@
 # Model construction and BOSL2
 
+For a new design, establish [interfaces, datums and construction choices](design-reasoning.md) before
+choosing library calls. For source edits, retain the original intent and baseline as described in
+[task routing](task-routing.md#source-editing). Select comparable views with [visual verification](visual-verification.md).
+
 ## Establish the library
 
-Resolve the intended executable explicitly. On Windows use `openscad.com` for CLI exit status and diagnostics.
+Resolve the intended executable explicitly. On Windows use its actual console launcher for CLI exit status
+and diagnostics: `scadmaxx.com` for a SCADMaxx delivery, or `openscad.com` for an OpenSCAD delivery.
 Inspect `--version` and `--info`; inspect the application's configured library paths as needed. A library
 present for another OpenSCAD installation is not proof that this process can load it.
 

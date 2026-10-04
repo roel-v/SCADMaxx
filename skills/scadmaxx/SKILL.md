@@ -34,6 +34,21 @@ The two passes do not require an intervening user approval when the requested sh
 
 ## Choose the relevant workflow
 
+Read [task routing](references/task-routing.md) to separate intent, operating surface, required evidence and
+interaction policy. Honor the user's explicit question/approval rules; when they require stopping after a
+question, end the turn and wait for their answer. Reversible assumptions never authorize ignoring that rule.
+
+| Task intent | Start here |
+| --- | --- |
+| Create | [Design reasoning](references/design-reasoning.md), then [modeling](references/modeling.md). |
+| Edit source | [Source editing](references/task-routing.md#source-editing), then [validation](references/validation.md). |
+| Edit an imported mesh | [Mesh editing](references/mesh-editing.md). |
+| Reconstruct an editable model | [Reverse engineering](references/reverse-engineering.md#mesh-reconstruction). |
+| Replicate an image | [Image replication](references/reverse-engineering.md#image-replication). |
+| Inspect | [Inspection](references/inspection.md). |
+
+Use [visual verification](references/visual-verification.md) for comparable evidence during changes.
+
 - For model structure, library setup and an ordinary parametric starter: [modeling](references/modeling.md).
 - For chamfers, roundovers and fillets: [edge treatments](references/edge-treatments.md).
 - For Customizer, reactive controls and objects: [Customizer](references/customizer.md), then the linked
