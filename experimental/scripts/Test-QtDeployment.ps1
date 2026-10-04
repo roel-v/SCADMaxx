@@ -46,14 +46,14 @@ $oldQpa = $env:QT_QPA_PLATFORM
 Push-Location $directory
 try {
     Invoke-Logged $compiler @('/nologo','/MD','/EHsc','/std:c++17','/Zc:__cplusplus','/permissive-',"/I$DependencyPrefix/include/Qt6",'probe.cc',
-        "/Fe:$staging/openscad.exe",'/link',"/LIBPATH:$DependencyPrefix/lib",'Qt6Widgets.lib','Qt6Gui.lib','Qt6Core.lib')
+        "/Fe:$staging/scadmaxx.exe",'/link',"/LIBPATH:$DependencyPrefix/lib",'Qt6Widgets.lib','Qt6Gui.lib','Qt6Core.lib')
     Copy-QtRuntime $DependencyPrefix $staging
     Invoke-Logged $p.cmake @("-DSTAGING=$staging","-DDEPENDENCY_BIN=$DependencyPrefix/bin",'-P',"$PSScriptRoot/Deploy-Runtime.cmake")
     $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
     $env:QT_PLUGIN_PATH = ''
     $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
     $env:QT_QPA_PLATFORM = 'windows'
-    Invoke-Logged (Join-Path $staging 'openscad.exe') @()
+    Invoke-Logged (Join-Path $staging 'scadmaxx.exe') @()
     if ((Get-Item (Join-Path $staging 'qt-probe.png')).Length -lt 100) { throw 'Qt fixture did not create its image.' }
     Save-Json (Join-Path $directory 'result.json') @{status='passed'; dependencyPrefix=$DependencyPrefix;
         checks=@('load staged Windows Qt plugin','use app-local Qt paths','render image with controlled PATH')}

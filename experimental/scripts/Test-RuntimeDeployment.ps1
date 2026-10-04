@@ -27,11 +27,11 @@ $compiler = Join-Path $env:VCToolsInstallDir 'bin/Hostx64/x64/cl.exe'
 Push-Location $directory
 try {
     Invoke-Logged $compiler @('/nologo','/MD','/LD','dependency.cc',"/Fe:$dependencyBin/deployment-probe.dll",'/link',"/IMPLIB:$directory/deployment-probe.lib")
-    Invoke-Logged $compiler @('/nologo','/MD','main.cc',"/Fe:$staging/openscad.exe",'/link',"$directory/deployment-probe.lib")
+    Invoke-Logged $compiler @('/nologo','/MD','main.cc',"/Fe:$staging/scadmaxx.exe",'/link',"$directory/deployment-probe.lib")
     Invoke-Logged $p.cmake @("-DSTAGING=$staging","-DDEPENDENCY_BIN=$dependencyBin",'-P',"$PSScriptRoot/Deploy-Runtime.cmake")
     if (!(Test-Path (Join-Path $staging 'deployment-probe.dll'))) { throw 'Deployment did not copy the required DLL.' }
-    Invoke-Logged (Join-Path $staging 'openscad.exe') @()
-    Copy-Item (Join-Path $staging 'openscad.exe') (Join-Path $missing 'openscad.exe')
+    Invoke-Logged (Join-Path $staging 'scadmaxx.exe') @()
+    Copy-Item (Join-Path $staging 'scadmaxx.exe') (Join-Path $missing 'scadmaxx.exe')
     $rejected = $false
     try {
         Invoke-Logged $p.cmake @("-DSTAGING=$missing","-DDEPENDENCY_BIN=$empty",'-P',"$PSScriptRoot/Deploy-Runtime.cmake")

@@ -9,7 +9,7 @@ foreach(required STAGING DEPENDENCY_BIN)
 endforeach()
 file(GLOB_RECURSE plugins "${STAGING}/*.dll")
 file(GET_RUNTIME_DEPENDENCIES
-  EXECUTABLES "${STAGING}/openscad.exe"
+  EXECUTABLES "${STAGING}/scadmaxx.exe"
   LIBRARIES ${plugins}
   DIRECTORIES "${STAGING}" "${DEPENDENCY_BIN}"
   RESOLVED_DEPENDENCIES_VAR resolved

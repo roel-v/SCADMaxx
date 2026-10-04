@@ -89,6 +89,7 @@ try {
     $version = "$($runInfo.versionDate)-experimental-$($runInfo.runId)"
     $navigationTuning = if (@($runInfo.entries | Where-Object { $_.id -eq 'navigation-cube' }).Count) { 'ON' } else { 'OFF' }
     $record.featureFlags = [ordered]@{
+        OPENSCAD_WINDOWS_OUTPUT_NAME='scadmaxx'
         ENABLE_NAVIGATION_CUBE_TUNING=$navigationTuning
         EXPERIMENTAL='ON'
         USE_MANIFOLD_MINKOWSKI='ON'
@@ -129,6 +130,7 @@ try {
                 "-DCMAKE_C_COMPILER=$compiler","-DCMAKE_CXX_COMPILER=$compiler",
                 "-DCMAKE_TOOLCHAIN_FILE=$($p.vcpkg)/scripts/buildsystems/vcpkg.cmake") + $dependencies.cmakeArguments + @(
                 '-DHEADLESS=OFF','-DUSE_QT6=ON','-DUSE_BUILTIN_OPENCSG=ON','-DENABLE_TESTS=ON',
+                '-DOPENSCAD_WINDOWS_OUTPUT_NAME=scadmaxx',
                 "-DENABLE_NAVIGATION_CUBE_TUNING=$navigationTuning",
                 "-DEXPERIMENTAL=$($record.featureFlags.EXPERIMENTAL)",
                 "-DUSE_MANIFOLD_MINKOWSKI=$($record.featureFlags.USE_MANIFOLD_MINKOWSKI)",
@@ -165,7 +167,7 @@ try {
                 Copy-QtRuntime $triplet $testRuntime
                 Get-ChildItem -LiteralPath $Build -Filter '*.dll' -File | Copy-Item -Destination $testRuntime
                 Invoke-Logged $cmake @("-DSTAGING=$testRuntime","-DDEPENDENCY_BIN=$triplet/bin",'-P',"$PSScriptRoot/Deploy-Runtime.cmake")
-                Invoke-Smoke (Join-Path $testRuntime 'openscad.exe') (Join-Path $Run $attemptId) $version -CleanPath
+                Invoke-Smoke (Join-Path $testRuntime 'scadmaxx.exe') (Join-Path $Run $attemptId) $version -CleanPath
             } finally {
                 $env:PATH = $previousTestPath
                 $env:QT_PLUGIN_PATH = $previousTestPlugins
@@ -202,7 +204,7 @@ try {
             # Include application-built runtime libraries copied by vcpkg's app-local hook.
             Get-ChildItem -LiteralPath $Build -Filter '*.dll' -File | Copy-Item -Destination $Staging
             Invoke-Logged $cmake @("-DSTAGING=$Staging","-DDEPENDENCY_BIN=$triplet/bin",'-P',"$PSScriptRoot/Deploy-Runtime.cmake")
-            foreach ($requiredResource in @('openscad.exe','msvcp140.dll','vcruntime140.dll','platforms/qwindows.dll','fonts','color-schemes',
+            foreach ($requiredResource in @('scadmaxx.exe','scadmaxx.com','msvcp140.dll','vcruntime140.dll','platforms/qwindows.dll','fonts','color-schemes',
                 'shaders','examples','templates','libraries/MCAD')) {
                 if (!(Test-Path (Join-Path $Staging $requiredResource))) { throw "Missing packaged resource: $requiredResource" }
             }
@@ -244,7 +246,7 @@ try {
                 qtDeployment='locked Release DLLs and Qt plugin directories with app-local qt.conf';
                 integrations=$ledger; verification='automated checks only; see GUI evidence'}
             Save-Json (Join-Path $Staging 'build-info.json') $info
-            Invoke-Smoke (Join-Path $Staging 'openscad.exe') (Join-Path $Run "$attemptId-smoke") $version -CleanPath
+            Invoke-Smoke (Join-Path $Staging 'scadmaxx.exe') (Join-Path $Run "$attemptId-smoke") $version -CleanPath
             $state.stagedSha = $head
             $state.staging = $Staging
             $state.stagingInventory = Get-FileInventory $Staging
@@ -257,13 +259,13 @@ try {
             $original = $state.stagingInventory | ForEach-Object { "$($_.path):$($_.sha256)" }
             $current = Get-FileInventory $Staging | ForEach-Object { "$($_.path):$($_.sha256)" }
             if (Compare-Object $original $current) { throw 'Staging changed after verification; stage and test a new attempt.' }
-            $zip = Join-Path (Split-Path $Staging) "OpenSCAD-experimental-$($runInfo.runId)-windows-x64.zip"
+            $zip = Join-Path (Split-Path $Staging) 'scadmaxx-2026100-windows-x64.zip'
             $extract = Join-Path (Split-Path $Staging) 'extracted-check'
             if ((Test-Path $zip) -or (Test-Path $extract)) { throw 'Existing package/extraction is preserved; use a new delivery attempt.' }
             $archiveContents = @(Get-ChildItem -LiteralPath $Staging | Select-Object -ExpandProperty FullName)
             Compress-Archive -LiteralPath $archiveContents -DestinationPath $zip
             Expand-Archive -LiteralPath $zip -DestinationPath $extract
-            Invoke-Smoke (Join-Path $extract 'openscad.exe') (Join-Path $Run "$attemptId-smoke") $version -CleanPath
+            Invoke-Smoke (Join-Path $extract 'scadmaxx.exe') (Join-Path $Run "$attemptId-smoke") $version -CleanPath
             $hash = Get-FileHash $zip -Algorithm SHA256
             Set-Content "$zip.sha256" "$($hash.Hash.ToLower())  $(Split-Path $zip -Leaf)" -Encoding ascii
             $record.zip = $zip
@@ -295,6 +297,7 @@ For this extracted tree, configure CMake directly using the recorded cache optio
 installed tree matching dependency-status.txt. Set VCPKG_MANIFEST_MODE=OFF, VCPKG_MANIFEST_INSTALL=OFF and
 VCPKG_INSTALLED_DIR to that tree; replace machine-specific source/build/tool paths. Dependencies are not installed
 by these scripts. Set OPENSCAD_VERSION and OPENSCAD_COMMIT from build-info.json.
+Set OPENSCAD_WINDOWS_OUTPUT_NAME=scadmaxx to produce scadmaxx.exe and scadmaxx.com.
 Then use cmake --build and cmake --install. The orchestration scripts require a Git checkout for provenance;
 they must not be used to claim that a newly initialized archive checkout has the original commit identity.
 '@ | Set-Content (Join-Path $material 'REBUILD.txt') -Encoding utf8NoBOM

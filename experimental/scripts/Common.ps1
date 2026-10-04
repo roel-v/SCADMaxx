@@ -175,6 +175,12 @@ function Invoke-Logged([string]$Executable, [string[]]$Arguments, [switch]$Rejec
 }
 
 function Invoke-Smoke([string]$Executable, [string]$Directory, [string]$Version, [switch]$CleanPath) {
+    $runtime = Split-Path $Executable
+    foreach ($obsolete in @('openscad.exe','openscad.com')) {
+        if (Test-Path (Join-Path $runtime $obsolete)) { throw "Obsolete executable in SCADMaxx runtime: $obsolete" }
+    }
+    $console = Join-Path $runtime 'scadmaxx.com'
+    if (!(Test-Path $console)) { throw 'Missing SCADMaxx console launcher.' }
     New-Item -ItemType Directory -Path $Directory | Out-Null
     $fixture = Join-Path $Directory 'smoke.scad'
     'difference() { cube([12,12,6], center=true); cylinder(h=10,r=3,center=true,$fn=32); }' |
@@ -191,7 +197,10 @@ function Invoke-Smoke([string]$Executable, [string]$Directory, [string]$Version,
         }
         $actualVersion = (& $Executable --version 2>&1 | Out-String)
         if ($LASTEXITCODE -ne 0 -or !$actualVersion.Contains($Version)) { throw "Unexpected application identity: $actualVersion" }
-        $actualVersion | Set-Content (Join-Path $Directory 'version.txt')
+          $actualVersion | Set-Content (Join-Path $Directory 'version.txt')
+          $consoleVersion = (& $console --version 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or !$consoleVersion.Contains($Version)) { throw "Unexpected console identity: $consoleVersion" }
+          $consoleVersion | Set-Content (Join-Path $Directory 'console-version.txt')
         $stl = Join-Path $Directory 'smoke.stl'
         Invoke-Logged $Executable @('-o',$stl,$fixture) -RejectErrors
         if (!(Test-Path $stl) -or (Get-Item $stl).Length -lt 100) { throw 'CLI render produced no useful STL.' }

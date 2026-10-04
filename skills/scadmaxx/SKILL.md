@@ -24,8 +24,12 @@ Preserve existing libraries and local modifications; an actual access restrictio
 
 Do not manually construct rings, profiles or vertex meshes and loft them with `skin()` to manufacture
 chamfers or fillets. Calling BOSL2's `skin()` for that workaround does not satisfy this rule.
-Legitimate lofted model bodies are a separate use. Read [edge treatments](references/edge-treatments.md)
-before choosing a helper; report a specific unsupported treatment instead of hiding it behind custom lofts.
+Also do not manufacture 3D edge treatments by rounding/chamfering a 2D outline and then adding further
+rounding/chamfering during extrusion, such as `round_corners()` followed by `offset_sweep()` with end treatments.
+Using dedicated BOSL2 functions within that profile-and-extrusion workaround does not make it acceptable.
+Legitimate lofted bodies and ordinary 2D outlines are separate uses. Read
+[edge treatments](references/edge-treatments.md) before choosing a helper; report unsupported treatments
+instead of using either workaround.
 The two passes do not require an intervening user approval when the requested shape is clear.
 
 ## Choose the relevant workflow
